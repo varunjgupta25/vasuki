@@ -14,7 +14,7 @@ Rules:
 """
 import sqlite3
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -84,15 +84,21 @@ def _get_active_lockout() -> Optional[dict]:
     _ensure_table()
     with _lock:
         conn = sqlite3.connect(_get_db_path())
+        # Both locked_until and the comparison value are stored/compared in UTC
         row = conn.execute(
             "SELECT id, locked_until, fail_count FROM intruder_lockouts "
             "WHERE locked_until > datetime('now') ORDER BY id DESC LIMIT 1"
         ).fetchone()
         conn.close()
     if row:
+        # Parse as UTC-aware datetime
+        locked_until = datetime.fromisoformat(row[1])
+        if locked_until.tzinfo is None:
+            # Legacy rows stored without tzinfo — treat as UTC
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
         return {
             "id": row[0],
-            "locked_until": datetime.fromisoformat(row[1]),
+            "locked_until": locked_until,
             "fail_count": row[2],
         }
     return None
@@ -117,7 +123,8 @@ def _upsert_fail_count(
     photo_path: Optional[str] = None,
 ) -> None:
     if locked_until is None:
-        locked_until = datetime.now()  # expired immediately = not locked
+        # Expired immediately = not locked; use UTC so SQLite datetime('now') comparison works
+        locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
     with _lock:
         conn = sqlite3.connect(_get_db_path())
         conn.execute("DELETE FROM intruder_lockouts")
@@ -144,7 +151,7 @@ def is_locked_out() -> tuple[bool, Optional[str]]:
     """Returns (True, 'Xm Ys remaining') if locked, (False, None) if not."""
     lockout = _get_active_lockout()
     if lockout:
-        remaining = lockout["locked_until"] - datetime.now()
+        remaining = lockout["locked_until"] - datetime.now(timezone.utc)
         total_secs = int(remaining.total_seconds())
         if total_secs > 0:
             mins = total_secs // 60
@@ -166,7 +173,8 @@ def record_failure(similarity: float) -> tuple[bool, Optional[str]]:
     if new_fails >= _MAX_FAILURES:
         # Capture intruder photo before writing lockout
         photo_path = _capture_intruder_photo()
-        locked_until = datetime.now() + timedelta(minutes=_LOCKOUT_MINUTES)
+        # Use UTC so the stored timestamp is consistent with SQLite datetime('now') (UTC)
+        locked_until = datetime.now(timezone.utc) + timedelta(minutes=_LOCKOUT_MINUTES)
         _upsert_fail_count(new_fails, similarity, locked_until, photo_path)
         if photo_path:
             print(f"[Security] Intruder photo captured: {photo_path}")

@@ -349,8 +349,9 @@ def _answer_question(params: dict) -> dict:
         }
     try:
         import ollama
+        from app.core.config import settings
         response = ollama.chat(
-            model="llama3.2:latest",
+            model=settings.INTENT_MODEL,
             messages=[
                 {
                     "role": "system",

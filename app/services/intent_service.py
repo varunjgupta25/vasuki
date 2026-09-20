@@ -55,7 +55,7 @@ def normalise(text: str) -> str:
 # param_builder receives the match object and returns the params dict.
 _REGEX_RULES = [
     (
-        r"^(?:open|find|show)\s+(?:my\s+)?(?:file|document|folder)\s+(?:called?\s+|named\s+)?(.+)$"
+        re.compile(r"^(?:open|find|show)\s+(?:my\s+)?(?:file|document|folder)\s+(?:called?\s+|named\s+)?(.+)$"),
         "file_operation",
         lambda m: {"operation": "search", "query": m.group(1).strip()},
     ),
@@ -221,8 +221,9 @@ def _parse_ollama_response(raw: str) -> Optional[dict]:
 def _try_ollama(text: str) -> Optional[dict]:
     try:
         import ollama
+        from app.core.config import settings
         response = ollama.chat(
-            model="llama3.2:latest",  # ONLY this model — glm-5.1:cloud is banned
+            model=settings.INTENT_MODEL,  # ONLY local model — glm-5.1:cloud is banned
             messages=[
                 {"role": "system", "content": _OLLAMA_SYSTEM},
                 {"role": "user", "content": text},
@@ -256,8 +257,9 @@ def prewarm_ollama() -> None:
     cold-start latency (2-3 seconds on Windows) for the first real command."""
     try:
         import ollama
+        from app.core.config import settings
         ollama.chat(
-            model="llama3.2:latest",
+            model=settings.INTENT_MODEL,
             messages=[{"role": "user", "content": "ping"}],
         )
     except Exception:

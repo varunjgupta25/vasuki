@@ -52,9 +52,32 @@ def create_file(name: str, content: str = "", location: str = "desktop") -> dict
 
 
 def open_file(path: str) -> dict:
-    """Open a file using its default Windows application."""
+    """Open a file using its default Windows application.
+
+    Security: the path must resolve to within the user home directory.
+    Anything outside (e.g. C:\\Windows\\System32\\cmd.exe) is rejected to
+    prevent path-traversal attacks — consistent with the module docstring.
+
+    Note on error messages: both "not found" and "out-of-home" cases return
+    a "File not found" message to avoid leaking whether a path exists outside
+    the home directory (fail-safe information hiding).
+    """
     try:
-        file_path = Path(path)
+        home = Path.home()
+        file_path = Path(path).resolve()
+
+        # Containment check — must be inside user home directory.
+        # Return "not found" (not "access denied") to avoid leaking path-existence
+        # info for locations outside the home directory.
+        try:
+            file_path.relative_to(home)
+        except ValueError:
+            return {
+                "success": False,
+                "message": f"File not found: {path}",
+                "path": path,
+            }
+
         if not file_path.exists():
             return {
                 "success": False,

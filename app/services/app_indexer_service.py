@@ -65,8 +65,13 @@ def _insert_app(name: str, path: str, source: str) -> None:
 
 
 def _name_from_path(path: str) -> str:
-    """Extract display name from file path, removing extension."""
-    return Path(path).stem.replace("-", " ").replace("_", " ")
+    """Extract display name from file path, removing extension.
+
+    Uses PureWindowsPath (not the OS-native Path) so that Windows-style
+    backslash paths are parsed correctly even on Linux/macOS test runners.
+    """
+    from pathlib import PureWindowsPath
+    return PureWindowsPath(path).stem.replace("-", " ").replace("_", " ")
 
 
 def _scan_lnk_files(directory: str, source: str) -> int:

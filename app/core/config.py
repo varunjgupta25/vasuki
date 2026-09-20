@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     SYSTEM_DB_URL: str = f"sqlite:///{SYSTEM_DB_PATH}"
     SYSTEM_DB_ASYNC_URL: str = f"sqlite+aiosqlite:///{SYSTEM_DB_PATH}"
 
+    # -- Models ---------------------------------------------------------------
+    INTENT_MODEL: str = "llama3.2:latest"  # Single source of truth — never hardcode elsewhere
+
     # -- Server ---------------------------------------------------------------
     HOST: str = "127.0.0.1"
     PORT: int = 8000
