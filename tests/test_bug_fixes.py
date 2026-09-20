@@ -327,3 +327,86 @@ def test_worker_alive_is_false_when_com_import_fails(tmp_path):
     t.join(timeout=2.0)
     assert not t.is_alive(), "Worker thread should have exited"
     assert alive_state["value"] is False, "_worker_alive should be False after COM import failure"
+
+
+# ---------------------------------------------------------------------------
+# RAM-Tiered Model Selection & Schema-Constrained Ollama Decoding
+# ---------------------------------------------------------------------------
+
+def test_settings_ram_tiered_model_resolution_fresh_instance(monkeypatch):
+    """
+    Verify that constructing a fresh Settings() instance resolves INTENT_MODEL
+    dynamically per-instance rather than baking in at import time.
+    - RAM < 8GB: phi4-mini
+    - RAM >= 8GB: qwen2.5:7b
+    """
+    from app.core.config import Settings
+
+    # Ensure no environment variable override is interfering
+    monkeypatch.delenv("INTENT_MODEL", raising=False)
+
+    with patch("app.core.config._detect_total_ram_gb", return_value=4.0):
+        s_low = Settings()
+        assert s_low.INTENT_MODEL == "phi4-mini", (
+            f"Expected phi4-mini for 4GB RAM, got {s_low.INTENT_MODEL}"
+        )
+
+    with patch("app.core.config._detect_total_ram_gb", return_value=16.0):
+        s_high = Settings()
+        assert s_high.INTENT_MODEL == "qwen2.5:7b", (
+            f"Expected qwen2.5:7b for 16GB RAM, got {s_high.INTENT_MODEL}"
+        )
+
+
+def test_settings_intent_model_env_override(monkeypatch):
+    """
+    Verify that an explicit INTENT_MODEL environment variable overrides the
+    default_factory and does NOT invoke RAM detection at all.
+    """
+    from app.core.config import Settings
+
+    monkeypatch.setenv("INTENT_MODEL", "custom-env-model:v1")
+    with patch("app.core.config._detect_total_ram_gb") as mock_ram:
+        s_custom = Settings()
+        assert s_custom.INTENT_MODEL == "custom-env-model:v1"
+        mock_ram.assert_not_called()
+
+
+def test_try_ollama_passes_schema_and_options():
+    """
+    Verify that _try_ollama() passes schema-constrained format and
+    options={'temperature': 0.0} to ollama.chat().
+    """
+    from unittest.mock import MagicMock
+    from app.services.intent_service import _try_ollama, OllamaIntentSchema
+
+    mock_response = {
+        "message": {
+            "content": '{"action": "lock_pc", "params": {}, "confidence": 1.0}'
+        }
+    }
+
+    with patch("ollama.chat", return_value=mock_response) as mock_chat:
+        result = _try_ollama("lock the computer")
+
+    assert mock_chat.called, "ollama.chat was not called"
+    call_kwargs = mock_chat.call_args.kwargs
+
+    # Check schema-constrained format argument
+    assert "format" in call_kwargs, "format kwarg missing from ollama.chat call"
+    assert call_kwargs["format"] == OllamaIntentSchema.model_json_schema(), (
+        f"format kwarg does not match OllamaIntentSchema.model_json_schema(): {call_kwargs['format']}"
+    )
+
+    # Check options argument
+    assert "options" in call_kwargs, "options kwarg missing from ollama.chat call"
+    assert call_kwargs["options"] == {"temperature": 0.0}, (
+        f"Expected options={{'temperature': 0.0}}, got {call_kwargs['options']}"
+    )
+
+    # Verify result shape
+    assert result is not None
+    assert result["action"] == "lock_pc"
+    assert result["params"] == {}
+    assert result["confidence"] == 1.0
+    assert result["source"] == "ollama"

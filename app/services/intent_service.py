@@ -24,10 +24,25 @@ import json
 import re
 import sqlite3
 import threading
-from typing import Optional
+from typing import Literal, Optional
+from pydantic import BaseModel
 
 _cache_lock = threading.Lock()
 _DB_PATH: Optional[str] = None
+
+
+class OllamaIntentSchema(BaseModel):
+    action: Literal[
+        "open_app",
+        "lock_pc",
+        "take_screenshot",
+        "type_text",
+        "web_search",
+        "answer_question",
+        "unknown",
+    ]
+    params: dict
+    confidence: float
 
 
 def _get_db_path() -> str:
@@ -228,6 +243,8 @@ def _try_ollama(text: str) -> Optional[dict]:
                 {"role": "system", "content": _OLLAMA_SYSTEM},
                 {"role": "user", "content": text},
             ],
+            format=OllamaIntentSchema.model_json_schema(),
+            options={"temperature": 0.0},
         )
         raw = response["message"]["content"]
         return _parse_ollama_response(raw)
