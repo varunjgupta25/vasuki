@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Runtime data (created at first boot — never commit)
+var/data/*
+!var/data/.gitkeep
+var/logs/*
+!var/logs/.gitkeep
+
+# Biometric voice profiles (per-user, added in Phase 3)
+var/data/voice_profiles/*.npy
+
+# Testing
+.pytest_cache/
+.coverage
