@@ -84,18 +84,22 @@ def _get_active_lockout() -> Optional[dict]:
     _ensure_table()
     with _lock:
         conn = sqlite3.connect(_get_db_path())
-        # Both locked_until and the comparison value are stored/compared in UTC
+        # Both locked_until and datetime('now') are evaluated in UTC.
+        # datetime(locked_until) normalises ISO (with 'T' and offset) as well as
+        # SQLite's space-separated format for strict comparison against datetime('now').
         row = conn.execute(
             "SELECT id, locked_until, fail_count FROM intruder_lockouts "
-            "WHERE locked_until > datetime('now') ORDER BY id DESC LIMIT 1"
+            "WHERE datetime(locked_until) > datetime('now') ORDER BY id DESC LIMIT 1"
         ).fetchone()
         conn.close()
     if row:
         # Parse as UTC-aware datetime
         locked_until = datetime.fromisoformat(row[1])
         if locked_until.tzinfo is None:
-            # Legacy rows stored without tzinfo — treat as UTC
+            # Stored without tzinfo — UTC representation
             locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until <= datetime.now(timezone.utc):
+            return None
         return {
             "id": row[0],
             "locked_until": locked_until,
@@ -125,6 +129,10 @@ def _upsert_fail_count(
     if locked_until is None:
         # Expired immediately = not locked; use UTC so SQLite datetime('now') comparison works
         locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if locked_until.tzinfo is not None:
+        locked_until = locked_until.astimezone(timezone.utc)
+    # Stored format exactly matches SQLite's datetime('now') output: space-separated, no offset, no microseconds
+    locked_until_str = locked_until.strftime("%Y-%m-%d %H:%M:%S")
     with _lock:
         conn = sqlite3.connect(_get_db_path())
         conn.execute("DELETE FROM intruder_lockouts")
@@ -132,7 +140,7 @@ def _upsert_fail_count(
             "INSERT INTO intruder_lockouts "
             "(locked_until, fail_count, last_similarity, photo_path) "
             "VALUES (?, ?, ?, ?)",
-            (locked_until.isoformat(), fail_count, similarity, photo_path),
+            (locked_until_str, fail_count, similarity, photo_path),
         )
         conn.commit()
         conn.close()

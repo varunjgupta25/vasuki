@@ -7,8 +7,6 @@ Bug-4 fix: if _tts_worker fails to start (import error, COM init error, or any
 other startup exception) _worker_alive is set to False and all blocking
 speak_and_wait() / _speak_pyttsx3() / _speak_edge_tts() calls detect this and
 return immediately instead of hanging forever on _tts_queue.join().
-A bounded join timeout (_WORKER_JOIN_TIMEOUT seconds) provides an additional
-safety net even if _worker_alive is stale.
 """
 import os
 import queue
@@ -19,8 +17,6 @@ _USE_EDGE_TTS = os.getenv("USE_EDGE_TTS", "false").lower() == "true"
 
 # Whether the worker thread started successfully and is running
 _worker_alive = False
-# Maximum seconds any blocking .join() will wait before giving up
-_WORKER_JOIN_TIMEOUT = 5.0
 
 
 def _tts_worker():
@@ -102,7 +98,7 @@ def _get_pyttsx3_engine():
 
 
 def _speak_pyttsx3(text: str) -> None:
-    """Speak via the SAPI queue and block until done (or worker dead/timeout)."""
+    """Speak via the SAPI queue and block until done (if worker is alive)."""
     if not _worker_alive:
         print("[TTS] _speak_pyttsx3: worker not alive, skipping.")
         return
@@ -111,7 +107,7 @@ def _speak_pyttsx3(text: str) -> None:
 
 
 def _speak_edge_tts(text: str) -> None:
-    """Speak via the SAPI queue and block until done (or worker dead/timeout)."""
+    """Speak via the SAPI queue and block until done (if worker is alive)."""
     if not _worker_alive:
         print("[TTS] _speak_edge_tts: worker not alive, skipping.")
         return

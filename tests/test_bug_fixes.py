@@ -11,6 +11,7 @@ HOW TO RUN:
     pytest tests/test_bug_fixes.py -v
 All tests are fully deterministic — no mic, no real Ollama, no real COM.
 """
+import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,8 @@ from app.services.intruder_detection_service import (
     record_failure,
     record_success,
     _LOCKOUT_MINUTES,
+    _get_active_lockout,
+    _ensure_table,
 )
 
 
@@ -100,6 +103,63 @@ def test_lockout_expires_after_lockout_minutes_not_offset(tmp_path):
             "Lock should have expired after 6 minutes but it's still active. "
             "UTC offset is probably being double-counted."
         )
+
+
+def test_expired_lockout_not_treated_as_active_by_sql_or_get_active_lockout(tmp_path):
+    """
+    Directly insert an already-expired lockout row (with ISO format containing 'T'
+    and SQLite space-separated format) and verify that neither the SQL query nor
+    _get_active_lockout() treats it as active.
+
+    This directly tests against the SQL string comparison bug where 'T' > ' '
+    caused ISO-formatted expired timestamps to evaluate as > datetime('now').
+    """
+    db = str(tmp_path / "expired_direct_test.db")
+    with patch("app.services.intruder_detection_service._get_db_path", return_value=db):
+        _ensure_table()
+        conn = sqlite3.connect(db)
+
+        # 1. Direct insert: ISO-8601 string with 'T' and timezone offset
+        expired_iso = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        conn.execute("DELETE FROM intruder_lockouts")
+        conn.execute(
+            "INSERT INTO intruder_lockouts (locked_until, fail_count, last_similarity) VALUES (?, ?, ?)",
+            (expired_iso, 3, 0.2),
+        )
+        conn.commit()
+
+        # Direct SQL query check:
+        row_sql = conn.execute(
+            "SELECT id FROM intruder_lockouts WHERE datetime(locked_until) > datetime('now')"
+        ).fetchone()
+        assert row_sql is None, (
+            f"SQL query treated expired ISO timestamp '{expired_iso}' as active: {row_sql}"
+        )
+
+        # Service function check:
+        assert _get_active_lockout() is None, (
+            f"_get_active_lockout() treated expired ISO timestamp '{expired_iso}' as active"
+        )
+
+        # 2. Direct insert: SQLite space-separated UTC format
+        expired_sqlite = (datetime.now(timezone.utc) - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("DELETE FROM intruder_lockouts")
+        conn.execute(
+            "INSERT INTO intruder_lockouts (locked_until, fail_count, last_similarity) VALUES (?, ?, ?)",
+            (expired_sqlite, 3, 0.2),
+        )
+        conn.commit()
+
+        row_sql_2 = conn.execute(
+            "SELECT id FROM intruder_lockouts WHERE datetime(locked_until) > datetime('now')"
+        ).fetchone()
+        assert row_sql_2 is None, (
+            f"SQL query treated expired SQLite timestamp '{expired_sqlite}' as active: {row_sql_2}"
+        )
+        assert _get_active_lockout() is None, (
+            f"_get_active_lockout() treated expired SQLite timestamp '{expired_sqlite}' as active"
+        )
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
